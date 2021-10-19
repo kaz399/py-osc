@@ -16,6 +16,8 @@ from __future__ import unicode_literals
 import sys
 import argparse
 import fileinput
+import time
+import asyncio
 from logging import getLogger, StreamHandler, DEBUG, WARNING, INFO
 from pythonosc import udp_client
 from pythonosc import osc_server
@@ -27,23 +29,35 @@ handler.setLevel(DEBUG)
 logger.setLevel(DEBUG)
 logger.addHandler(handler)
 
-def rx_filter(address, args):
+def rx_default_handler(address, *args):
     print(address, args)
 
-def example1(addr, port, rx_port):
-    dispatch = dispatcher.Dispatcher()
-    dispatch.map('*', rx_filter)
-    server = osc_server.BlockingOSCUDPServer((addr, rx_port), dispatch)
+dispatch = dispatcher.Dispatcher()
+dispatch.set_default_handler(rx_default_handler)
 
+async def loop(addr, port):
     client = udp_client.SimpleUDPClient(addr, port)
-    client.send_message('/motor', [1, 100, -100, 500])
+    for i in range(10):
+        print(i)
+        client.send_message('/motor', [0, 100, -100, 500])
+        client.send_message('/motor', [1, 100, -100, 500])
+        await asyncio.sleep(1)
+
+async def example1(addr, port, rx_port):
+    server = osc_server.AsyncIOOSCUDPServer((addr, rx_port), dispatch, asyncio.get_event_loop())
+    transport, protocol = await server.create_serve_endpoint()
+
+    await loop(addr, port)
+
+    transport.close()
+    print('done')
 
 def options(argv):
     op = argparse.ArgumentParser()
     op.add_argument('--dry-run', action='store_true', help='do not perform actions')
     op.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
     op.add_argument('-q', '--quiet', action='store_true', help='quiet mode')
-    op.add_argument('-a', '--address', action='store', default='localhost', help='OSC server address')
+    op.add_argument('-a', '--address', action='store', default='127.0.0.1', help='OSC server address')
     op.add_argument('-p', '--port', action='store', default=3334, help='OSC server port (TX)')
     op.add_argument('-r', '--rx-port', action='store', default=3333, help='OSC server port (RX)')
     op.add_argument('argv', nargs='*', help='args')
@@ -64,7 +78,7 @@ def main(argv):
     opt = options(argv)
 
     if len(argv) >= 1:
-        example1(opt.address, opt.port, opt.rx_port)
+        asyncio.run(example1(opt.address, opt.port, opt.rx_port))
     else:
         pass
 
